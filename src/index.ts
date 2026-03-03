@@ -1,5 +1,6 @@
 import express, { NextFunction, Request, Response } from "express";
 import { config } from "./config.js";
+import { error } from "node:console";
 
 const app = express();
 const PORT = 8080;
@@ -53,19 +54,19 @@ export function MetricsReset(req: Request, res: Response) {
   res.send("OK");
 }
 
-export function handlerValidateChirp(req: Request, res: Response): void {
+export async  function handlerValidateChirp(req: Request, res: Response): Promise<void> {
   const body = (req.body as any)?.body;
 
   // Validate structure
   if (typeof body !== "string") {
-    res.status(400).json({ error: "Something went wrong" });
-    return;
+    throw new BadRequestError("Something went wrong");
   }
 
   // Validate length
   if (body.length > 140) {
-    res.status(400).json({ error: "Chirp is too long" });
-    return;
+    
+     throw new BadRequestError("Chirp is too long. Max length is 140");
+
   }
 
   // Profanity filter (case-insensitive, no punctuation handling)
@@ -75,9 +76,53 @@ export function handlerValidateChirp(req: Request, res: Response): void {
     .split(" ")
     .map((word) => (bannedWords.includes(word.toLowerCase()) ? "****" : word))
     .join(" ");
-
-  // ✅ MUST return an object with cleanedBody (not an array)
   res.status(200).json({ cleanedBody });
+}
+
+export function errorHandler( err: Error,req: Request,res: Response,next: NextFunction) {
+  console.log(err.message);
+  res.status(500).json({
+    error: "Something went wrong on our end",
+  });
+}
+
+class BadRequestError extends Error {
+   statusCode: number;
+constructor(message: string) {
+    super(message);
+    this.statusCode = 400;
+  }
+}
+class UnauthorizedError extends Error {
+   statusCode: number;
+constructor(message: string) {
+    super(message);
+    this.statusCode = 401;
+  }
+}
+class ForbiddenError extends Error {
+   statusCode: number;
+constructor(message: string) {
+    super(message);
+    this.statusCode = 403;
+  }
+}
+class NotFoundError extends Error {
+   statusCode: number;
+constructor(message: string) {
+    super(message);
+    this.statusCode = 404;
+  }
+}
+
+function errorMiddleware(
+  err: Error,
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) {
+const status = (err as any).statusCode || 500;
+res.status(status).json({ error: err.message });
 }
 
 // Middlewares + routes
@@ -90,8 +135,10 @@ app.use("/app", express.static("./src/app"));
 
 app.get("/admin/metrics", Metricsprint);
 app.post("/admin/reset", MetricsReset);
-
-app.post("/api/validate_chirp", handlerValidateChirp);
+app.post("/api/validate_chirp", (req, res, next) => {
+  Promise.resolve(handlerValidateChirp(req, res)).catch(next);
+});
+app.use(errorMiddleware);
 
 app.listen(PORT, () => {
   console.log(`Server is running at http://localhost:${PORT}`);
